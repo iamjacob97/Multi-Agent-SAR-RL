@@ -1,0 +1,12 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Training results
+*.pth
+training_results.png
