@@ -1,6 +1,6 @@
 import numpy as np
 
-class BaseAgent:
+class IndependentAgent:
     def __init__(self, state_size, action_size=5, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1):
         self.state_size = state_size
         self.action_size = action_size
