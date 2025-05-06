@@ -64,8 +64,8 @@ class RescueEnv:
 
         return self._get_observation()
     
-    def update_agent(self, idx, action):
-        r, c = self.agent_positions[idx]
+    def update_agent(self, agent, action):
+        r, c = self.agent_positions[agent.id]
         dr, dc = self.ACTION_DELTAS[action]
         nr, nc = r + dr, c + dc
 
@@ -76,76 +76,74 @@ class RescueEnv:
                 self.victim_positions.remove((nr, nc))
                 self.rescued += 1
                 reward += 10
-                self.rescued_now.append((nr, nc))
+                agent.rescued.add((nr, nc))
+                agent.known_victims.remove((nr, nc))
 
             self.grid[r, c] = self.EMPTY
             self.grid[nr, nc] = self.AGENT
-            self.agent_positions[idx] = (nr, nc)
+            self.agent_positions[agent.id] = (nr, nc)
 
-            if (nr, nc) in self.visited_cells[idx]:
+            if (nr, nc) in self.visited_cells[agent.id]:
                 reward -= 0.2
+                self.visited_flag[agent.id] = 1
             else:
                 reward += 0.2
-                self.visited_cells[idx].add((nr, nc))
+                self.visited_flag[agent.id] = 0
+                self.visited_cells[agent.id].add((nr, nc))
 
             self.global_visit_count[(nr, nc)] += 1
-
         else:
-            reward -= 1.0
+            reward -= 1
 
         return reward
 
-    def step(self, actions, agents=None):
-        self.rescued_now = []
-        rewards = []
+    def step(self, actions, agents):
+        payloads = [agent.send(self.steps) for agent in agents]
+        rewards = [-0.02 * len(payload) for payload in payloads]
+        inbox = set().union(*payloads)
 
-        merged_payload = set()
-        if agents is not None:
-            payloads = [ag.send(self.steps) for ag in agents]
-            for p in payloads:
-                merged_payload.update(p)
-            # bandwidth cost
-            for i, pay in enumerate(payloads):
-                rewards.append(-0.02 * len(pay))
-                agents[i].bytes_sent += len(pay)
-        else:
-            rewards = [0.0] * self.num_agents
+        self.visited_flag = [0] * self.num_agents
 
-        for idx, action in enumerate(actions):
-            rewards[idx] += self.update_agent(idx, action)
+        for message in inbox:
+            for agent in agents:
+               agent.receive(message)
+               if message[0] == "C":
+                   self.visited_cells[agent.id].add(message[1])
+
+        for agent, action in zip(agents, actions):
+            rwd = self.update_agent(agent, action)
+            rewards[agent.id] += rwd
 
         self.steps += 1
-        done = (self.rescued == self.num_victims) or (self.steps >= self.max_steps)
+        
+        done = self.steps >= self.max_steps or self.rescued == self.num_victims
+        info = {"steps": self.steps, "rescued": self.rescued, "comms": inbox}
 
-        obs_next = self._get_observation()
-        info = {"rescued": self.rescued_now, "comms": merged_payload}
 
-        if agents is not None:
-            for ag in agents:
-                ag.receive(merged_payload)
+        return self._get_observation(), rewards, done, info
 
-        return obs_next, rewards, done, info
-    
     def _get_observation(self):
         obs = []
-        for idx in range(self.num_agents):
-            r, c = self.agent_positions[idx]
-            patch = np.zeros((3, 3), dtype=int)
-            victims_local = []
+        H, W = self.grid_size
+        for idx, (r, c) in enumerate(self.agent_positions):
+            mask = 0
+            bit  = 0
+            local_victims = []
+
             for dr in (-1, 0, 1):
                 for dc in (-1, 0, 1):
                     rr, cc = r + dr, c + dc
-                    if 0 <= rr < self.grid_size[0] and 0 <= cc < self.grid_size[1]:
-                        patch[dr+1, dc+1] = self.grid[rr, cc]
-                        if self.grid[rr, cc] == self.VICTIM:
-                            victims_local.append((rr, cc))
 
-            obs.append({
-                "local_grid": patch,
-                "position":   (r, c),
-                "victim_positions": victims_local,
-                "steps": self.steps
-            })
+                    if not (0 <= rr < H and 0 <= cc < W) or self.grid[rr, cc] == self.OBSTACLE:
+                        mask |= 1 << bit
+                    else:
+                        if self.grid[rr, cc] == self.VICTIM:
+                            local_victims.append((rr, cc))
+                    bit += 1
+            visited_flag = self.visited_flag[idx]
+            obs.append({"agent_id": idx,"position": (r, c),
+                        "obstacle_mask": mask, "victim_positions": local_victims,
+                        "steps": self.steps, "visited_flag": visited_flag})
         return obs
 
     def render(self):
