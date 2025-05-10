@@ -1,0 +1,237 @@
+STATISTICAL ANALYSIS
+===================
+
+Comparison: Independent vs Limited
+--------------------------------------------------
+Metric: reward
+  independent: 61.85, limited: 64.75
+  t-statistic: -3.9107, p-value: 0.0012
+  Cohen's d: 1.8435 (large effect)
+  Better strategy: limited
+
+Metric: steps
+  independent: 27.60, limited: 27.37
+  t-statistic: 1.0808, p-value: 0.2958
+  Cohen's d: -0.5095 (medium effect)
+  Better strategy: limited
+
+Metric: duplicates
+  independent: 27.47, limited: 23.68
+  t-statistic: 8.2224, p-value: 0.0000
+  Cohen's d: -3.8761 (large effect)
+  Better strategy: limited
+
+Metric: bytes
+  independent: 0.00, limited: 797.01
+  t-statistic: -62.3650, p-value: 0.0000
+  Cohen's d: 29.3992 (large effect)
+  Better strategy: independent
+
+Metric: coverage
+  independent: 0.54, limited: 0.56
+  t-statistic: -11.0535, p-value: 0.0000
+  Cohen's d: 5.2107 (large effect)
+  Better strategy: limited
+
+Metric: success_rate
+  independent: 0.53, limited: 0.57
+  t-statistic: -1.5753, p-value: 0.1348
+  Cohen's d: 0.7426 (medium effect)
+  Better strategy: limited
+
+
+Comparison: Independent vs Selective
+--------------------------------------------------
+Metric: reward
+  independent: 61.85, selective: 64.35
+  t-statistic: -3.1955, p-value: 0.0056
+  Cohen's d: 1.5064 (large effect)
+  Better strategy: selective
+
+Metric: steps
+  independent: 27.60, selective: 26.88
+  t-statistic: 3.7343, p-value: 0.0018
+  Cohen's d: -1.7604 (large effect)
+  Better strategy: selective
+
+Metric: duplicates
+  independent: 27.47, selective: 24.46
+  t-statistic: 6.8054, p-value: 0.0000
+  Cohen's d: -3.2081 (large effect)
+  Better strategy: selective
+
+Metric: bytes
+  independent: 0.00, selective: 458.37
+  t-statistic: -316.9665, p-value: 0.0000
+  Cohen's d: 149.4194 (large effect)
+  Better strategy: independent
+
+Metric: coverage
+  independent: 0.54, selective: 0.55
+  t-statistic: -3.9651, p-value: 0.0011
+  Cohen's d: 1.8692 (large effect)
+  Better strategy: selective
+
+Metric: success_rate
+  independent: 0.53, selective: 0.59
+  t-statistic: -2.6317, p-value: 0.0181
+  Cohen's d: 1.2406 (large effect)
+  Better strategy: selective
+
+
+Comparison: Independent vs Full
+--------------------------------------------------
+Metric: reward
+  independent: 61.85, full: 68.70
+  t-statistic: -8.9098, p-value: 0.0000
+  Cohen's d: 4.2001 (large effect)
+  Better strategy: full
+
+Metric: steps
+  independent: 27.60, full: 26.80
+  t-statistic: 3.7470, p-value: 0.0018
+  Cohen's d: -1.7664 (large effect)
+  Better strategy: full
+
+Metric: duplicates
+  independent: 27.47, full: 21.55
+  t-statistic: 12.5565, p-value: 0.0000
+  Cohen's d: -5.9192 (large effect)
+  Better strategy: full
+
+Metric: bytes
+  independent: 0.00, full: 2189.52
+  t-statistic: -14.8334, p-value: 0.0000
+  Cohen's d: 6.9925 (large effect)
+  Better strategy: independent
+
+Metric: coverage
+  independent: 0.54, full: 0.58
+  t-statistic: -18.7773, p-value: 0.0000
+  Cohen's d: 8.8517 (large effect)
+  Better strategy: full
+
+Metric: success_rate
+  independent: 0.53, full: 0.62
+  t-statistic: -3.7570, p-value: 0.0017
+  Cohen's d: 1.7711 (large effect)
+  Better strategy: full
+
+
+Comparison: Limited vs Selective
+--------------------------------------------------
+Metric: reward
+  limited: 64.75, selective: 64.35
+  t-statistic: 1.0205, p-value: 0.3227
+  Cohen's d: -0.4811 (small effect)
+  Better strategy: limited
+
+Metric: steps
+  limited: 27.37, selective: 26.88
+  t-statistic: 4.5878, p-value: 0.0003
+  Cohen's d: -2.1627 (large effect)
+  Better strategy: selective
+
+Metric: duplicates
+  limited: 23.68, selective: 24.46
+  t-statistic: -3.1823, p-value: 0.0058
+  Cohen's d: 1.5001 (large effect)
+  Better strategy: limited
+
+Metric: bytes
+  limited: 797.01, selective: 458.37
+  t-statistic: 26.3300, p-value: 0.0000
+  Cohen's d: -12.4121 (large effect)
+  Better strategy: selective
+
+Metric: coverage
+  limited: 0.56, selective: 0.55
+  t-statistic: 6.4277, p-value: 0.0000
+  Cohen's d: -3.0300 (large effect)
+  Better strategy: limited
+
+Metric: success_rate
+  limited: 0.57, selective: 0.59
+  t-statistic: -2.0420, p-value: 0.0580
+  Cohen's d: 0.9626 (large effect)
+  Better strategy: selective
+
+
+Comparison: Limited vs Full
+--------------------------------------------------
+Metric: reward
+  limited: 64.75, full: 68.70
+  t-statistic: -10.8775, p-value: 0.0000
+  Cohen's d: 5.1277 (large effect)
+  Better strategy: full
+
+Metric: steps
+  limited: 27.37, full: 26.80
+  t-statistic: 4.0657, p-value: 0.0009
+  Cohen's d: -1.9166 (large effect)
+  Better strategy: full
+
+Metric: duplicates
+  limited: 23.68, full: 21.55
+  t-statistic: 7.2859, p-value: 0.0000
+  Cohen's d: -3.4346 (large effect)
+  Better strategy: full
+
+Metric: bytes
+  limited: 797.01, full: 2189.52
+  t-statistic: -9.3987, p-value: 0.0000
+  Cohen's d: 4.4306 (large effect)
+  Better strategy: limited
+
+Metric: coverage
+  limited: 0.56, full: 0.58
+  t-statistic: -9.5650, p-value: 0.0000
+  Cohen's d: 4.5090 (large effect)
+  Better strategy: full
+
+Metric: success_rate
+  limited: 0.57, full: 0.62
+  t-statistic: -3.8922, p-value: 0.0013
+  Cohen's d: 1.8348 (large effect)
+  Better strategy: full
+
+
+Comparison: Selective vs Full
+--------------------------------------------------
+Metric: reward
+  selective: 64.35, full: 68.70
+  t-statistic: -9.8736, p-value: 0.0000
+  Cohen's d: 4.6544 (large effect)
+  Better strategy: full
+
+Metric: steps
+  selective: 26.88, full: 26.80
+  t-statistic: 0.6560, p-value: 0.5211
+  Cohen's d: -0.3093 (small effect)
+  Better strategy: full
+
+Metric: duplicates
+  selective: 24.46, full: 21.55
+  t-statistic: 11.0369, p-value: 0.0000
+  Cohen's d: -5.2029 (large effect)
+  Better strategy: full
+
+Metric: bytes
+  selective: 458.37, full: 2189.52
+  t-statistic: -11.7275, p-value: 0.0000
+  Cohen's d: 5.5284 (large effect)
+  Better strategy: selective
+
+Metric: coverage
+  selective: 0.55, full: 0.58
+  t-statistic: -14.3972, p-value: 0.0000
+  Cohen's d: 6.7869 (large effect)
+  Better strategy: full
+
+Metric: success_rate
+  selective: 0.59, full: 0.62
+  t-statistic: -2.4416, p-value: 0.0266
+  Cohen's d: 1.1510 (large effect)
+  Better strategy: full
+
+
