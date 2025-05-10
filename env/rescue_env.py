@@ -5,7 +5,7 @@ class RescueEnv:
 
     ACTION_DELTAS = {0: (-1, 0), 1: ( 1, 0), 2: ( 0, -1), 3: ( 0, 1)}
 
-    def __init__(self, grid_size=(10, 10), num_agents=3, num_victims=7, num_obstacles=11, max_steps=57, seed=None, lambda_cost = 0.0):
+    def __init__(self, grid_size=(10, 10), num_agents=3, num_victims=7, num_obstacles=11, max_steps=33, seed=None, lambda_cost = 0.01):
         self.grid_size = grid_size
         self.num_agents = num_agents
         self.num_victims = num_victims

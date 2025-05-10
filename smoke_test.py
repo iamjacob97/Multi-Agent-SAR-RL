@@ -12,7 +12,7 @@ NUM_VICTIMS = 3
 NUM_OBSTACLES = 5
 MAX_STEPS = 17
 SEED = 27
-NUM_EPISODES = 3579  # Reduced for smoke test
+NUM_EPISODES = 1000
 
 def check_environment():
     print("\nCHECKING ENVIRONMENT...")

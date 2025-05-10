@@ -2,7 +2,7 @@ import numpy as np
 from agents import IndependentAgent
 
 class SelectiveAgent(IndependentAgent):
-    def __init__(self, idx, comm_interval=25, **kwargs):
+    def __init__(self, idx, comm_interval=11, **kwargs):
         super().__init__(idx, **kwargs)
         self.comm_interval = comm_interval
         self.last_comm = -comm_interval

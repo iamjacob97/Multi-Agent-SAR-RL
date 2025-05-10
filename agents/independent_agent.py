@@ -3,7 +3,7 @@ from collections import defaultdict
 
 
 class IndependentAgent:
-    def __init__(self, idx, action_space=4, alpha=0.73, alpha_min=0.05, gamma=0.93, epsilon=0.97, eps_min=0.05, total_episodes = 51973):
+    def __init__(self, idx, action_space=4, alpha=0.73, alpha_min=0.05, gamma=0.93, epsilon=0.97, eps_min=0.05, total_episodes = 357951):
         self.id = idx
         self.action_space = action_space
         self.alpha = alpha
@@ -16,6 +16,7 @@ class IndependentAgent:
         self.eps_decay   = (self.eps_min / self.epsilon) ** (1 / decay_episodes)
 
         self.q_table = defaultdict(lambda: np.zeros(self.action_space))
+        self.q_table_size = 0
 
         self.known_victims = set()
         self.shared_victims = set()
@@ -73,6 +74,7 @@ class IndependentAgent:
 
         if done:
             self.decay()
+            self.q_table_size = len(self.q_table)
         
         return td_error
     def get_payload(self):

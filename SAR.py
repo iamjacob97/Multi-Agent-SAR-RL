@@ -7,7 +7,10 @@ import os
 import time
 import argparse
 from datetime import datetime
-import copy
+import seaborn as sns
+from multiprocessing import Process, Manager
+from scipy import stats
+import math
 from collections import deque
 
 # Configuration
@@ -15,94 +18,105 @@ NUM_AGENTS = 3
 NUM_VICTIMS = 7
 NUM_OBSTACLES = 11
 GRID_SIZE = (10, 10)
-TOTAL_EPISODES = 17935
-MAX_STEPS = 79
-SEEDS = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]  
-EVAL_SEED = 10  # Fixed seed for evaluation
-EVAL_EPISODES = 10101  # Number of evaluation episodes per agent type
+TOTAL_EPISODES = 357951
+MAX_STEPS = 33 
+SEEDS = [1, 3, 5, 7, 9, 11, 13, 15, 17]  # Seeds for reproducibility
 AGENT_TYPES = ['independent', 'limited', 'selective', 'full']
+EVAL_EPISODES = 100  # Number of evaluation episodes
+EVAL_EVERY = 1000  # Evaluate every X episodes
 LOG_DIR = "results"
 
-def create_agents(agent_type, num_agents, total_episodes=TOTAL_EPISODES):
+
+def create_agents(agent_type, num_agents):
     agents = []
     
     for i in range(num_agents):
         if agent_type == 'independent':
-            agents.append(IndependentAgent(i, total_episodes=total_episodes))
+            agents.append(IndependentAgent(i))
         elif agent_type == 'limited':
-            agents.append(LimitedAgent(i, comm_interval=5, total_episodes=total_episodes))
+            agents.append(LimitedAgent(i, comm_interval=5))
         elif agent_type == 'selective':
-            agents.append(SelectiveAgent(i, comm_interval=25, total_episodes=total_episodes))
+            agents.append(SelectiveAgent(i, comm_interval=25))
         elif agent_type == 'full':
-            agents.append(FullAgent(i, total_episodes=total_episodes))
+            agents.append(FullAgent(i))
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")
             
     return agents
 
-def run_episode(env, agents, verbose=False, evaluation_mode=False):
+
+def run_episode(env, agents, evaluation_mode=False):
     obs = env.reset()
     done = False
-    total_reward = [0.0] * len(agents)
-    ep_steps = 0
-    comm_count = 0
-    bytes_sent = 0
+    total_reward = 0
     
     for agent in agents:
         agent.reset()
+    
+    # Store initial bytes count to track new bytes sent during episode
+    initial_bytes = sum(agent.bytes_sent for agent in agents)
     
     while not done:
         # In evaluation mode, force epsilon to 0 for pure exploitation
         if evaluation_mode:
             actions = []
-            for ag, o in zip(agents, obs):
-                # Store original epsilon
-                original_epsilon = ag.epsilon
-                ag.epsilon = 0
-                action = ag.act(o)
-                # Restore original epsilon after action selection
-                ag.epsilon = original_epsilon
+            for agent, o in zip(agents, obs):
+                original_epsilon = agent.epsilon
+                agent.epsilon = 0
+                action = agent.act(o)
+                agent.epsilon = original_epsilon
                 actions.append(action)
         else:
-            actions = [ag.act(o) for ag, o in zip(agents, obs)]
+            actions = [agent.act(o) for agent, o in zip(agents, obs)]
             
         next_obs, rewards, done, info = env.step(actions, agents)
         
-        # Track communication
-        comm_count += len(info['comms'])
-        bytes_sent += sum(ag.bytes_sent for ag in agents)
-        
-        for i, (ag, o, rw) in enumerate(zip(agents, next_obs, rewards)):
-            # Only update Q-values during training, not evaluation
+        for agent, o, r in zip(agents, next_obs, rewards):
             if not evaluation_mode:
-                ag.update(o, rw, done, info)
-            total_reward[i] += rw
+                agent.update(o, r, done, info)
+            total_reward += r
 
         obs = next_obs
-        ep_steps += 1
-        
-        if verbose and ep_steps % 10 == 0:
-            env.render()
-            
-    # Calculate coverage and duplicate visits
-    total_cells = env.grid_size[0] * env.grid_size[1]
-    visited_cells_union = set().union(*env.visited_cells)
-    coverage = len(visited_cells_union) / total_cells
-    duplicate_visits = sum(v-1 for v in env.global_visit_count.values())
+    
+    # Calculate duplicate visits (redundancy metric)
+    duplicates = sum(count-1 for count in env.global_visit_count.values() if count > 1)
+    
+    # Calculate bytes sent during this episode
+    current_bytes = sum(agent.bytes_sent for agent in agents)
+    bytes_sent = current_bytes - initial_bytes
     
     return {
-        'total_reward': sum(total_reward),
-        'steps': ep_steps,
-        'rescued': info['rescued'],
-        'coverage': coverage,
-        'comm_count': comm_count,
-        'bytes_sent': bytes_sent,
-        'duplicate_visits': duplicate_visits,
+        'total_reward': total_reward,
+        'steps': info['steps'],
+        'victims': info['rescued'], 
+        'duplicates': duplicates,
+        'bytes': bytes_sent,
+        'coverage': info['coverage'],
         'success': info['rescued'] == env.num_victims
     }
 
-def run_experiment(agent_type, seed, log_dir, total_episodes=TOTAL_EPISODES):
-    print(f"Running experiment with agent_type={agent_type}, seed={seed}")
+
+def run_evaluation(env, agents, num_episodes):
+    success_count = 0
+    steps_list = []
+    
+    for _ in range(num_episodes):
+        result = run_episode(env, agents, evaluation_mode=True)
+        if result['success']:
+            success_count += 1
+        steps_list.append(result['steps'])
+    
+    success_rate = success_count / num_episodes
+    steps_mean = np.mean(steps_list) if steps_list else 0
+    
+    return {
+        'eval_success_rate': success_rate,
+        'eval_steps_mean': steps_mean
+    }
+
+
+def train_and_evaluate(agent_type, seed, shared_results):
+    print(f"[{agent_type} | seed {seed}] Starting training...")
     
     # Create environment and agents
     env = RescueEnv(
@@ -114,423 +128,420 @@ def run_experiment(agent_type, seed, log_dir, total_episodes=TOTAL_EPISODES):
         seed=seed
     )
     
-    agents = create_agents(agent_type, NUM_AGENTS, total_episodes)
+    agents = create_agents(agent_type, NUM_AGENTS)
     
     # Setup logging
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(log_dir, f"{agent_type}_seed{seed}_{timestamp}_training.csv")
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    os.makedirs(LOG_DIR, exist_ok=True)
     
-    # Initialize metrics tracking
-    metrics = []
-    eval_interval = 500  # Evaluate every 500 episodes to reduce data size
+    training_log = []
+    eval_log = []
     
-    # Progress tracking
+    # Metrics for tracking rolling averages using deques
+    reward_window = deque(maxlen=100)
+    victims_window = deque(maxlen=100)
+    duplicates_window = deque(maxlen=100)
+    bytes_window = deque(maxlen=100)
+    
     start_time = time.time()
     
-    # Run episodes
-    for episode in range(1, total_episodes + 1):
-        # Run episode
+    # Training loop
+    for episode in range(1, TOTAL_EPISODES + 1):
+        # Run training episode
         result = run_episode(env, agents)
         
-        # Keep the last 500 episodes' results for rolling average
-        if episode == 1:
-            # Initialize deques to store metrics for rolling average
-            window_size = 500
-            rolling_results = {
-                'total_reward': deque(maxlen=window_size),
-                'steps': deque(maxlen=window_size),
-                'rescued': deque(maxlen=window_size),
-                'coverage': deque(maxlen=window_size),
-                'comm_count': deque(maxlen=window_size),
-                'bytes_sent': deque(maxlen=window_size),
-                'duplicate_visits': deque(maxlen=window_size),
-                'success_rate': deque(maxlen=window_size)
-            }
+        # Track metrics
+        reward_window.append(result['total_reward'])
+        victims_window.append(result['victims'])
+        duplicates_window.append(result['duplicates'])
+        bytes_window.append(result['bytes'])
         
-        # Add current episode results to rolling window
-        rolling_results['total_reward'].append(result['total_reward'])
-        rolling_results['steps'].append(result['steps'])
-        rolling_results['rescued'].append(result['rescued'])
-        rolling_results['coverage'].append(result['coverage'])
-        rolling_results['comm_count'].append(result['comm_count'])
-        rolling_results['bytes_sent'].append(result['bytes_sent'])
-        rolling_results['duplicate_visits'].append(result['duplicate_visits'])
-        rolling_results['success_rate'].append(1 if result['success'] else 0)
-        
-        # Track metrics at regular intervals or at first/last episode
-        if episode % eval_interval == 0 or episode == 1 or episode == total_episodes:
-            print(f"Episode {episode}/{total_episodes}, Time elapsed: {(time.time() - start_time):.2f}s")
-            
-            # Calculate rolling averages
-            rolling_avg = {key: sum(values) / len(values) for key, values in rolling_results.items()}
-            
-            metrics.append({
-                'episode': episode,
-                'seed': seed,
-                'agent_type': agent_type,
-                'total_reward': rolling_avg['total_reward'],
-                'steps': rolling_avg['steps'],
-                'rescued': rolling_avg['rescued'],
-                'coverage': rolling_avg['coverage'],
-                'comm_count': rolling_avg['comm_count'],
-                'bytes_sent': rolling_avg['bytes_sent'],
-                'duplicate_visits': rolling_avg['duplicate_visits'],
-                'success_rate': rolling_avg['success_rate'],
-                'epsilon': agents[0].epsilon,
-                'alpha': agents[0].alpha
-            })
-            
-    # Save metrics to CSV
-    metrics_df = pd.DataFrame(metrics)
-    metrics_df.to_csv(log_path, index=False)
-    print(f"Training results saved to {log_path}")
-    
-    # Return the trained agents for evaluation
-    return agents
-
-def run_evaluation(agent_type, trained_agents, log_dir):
-    """Run evaluation episodes with fixed seed and epsilon=0"""
-    print(f"Evaluating agent_type={agent_type} with epsilon=0")
-    
-    # Create a new environment with the evaluation seed
-    env = RescueEnv(
-        grid_size=GRID_SIZE,
-        num_agents=NUM_AGENTS,
-        num_victims=NUM_VICTIMS,
-        num_obstacles=NUM_OBSTACLES,
-        max_steps=MAX_STEPS,
-        seed=EVAL_SEED
-    )
-    
-    # Make deep copies of agents to avoid modifying the originals
-    agents = copy.deepcopy(trained_agents)
-    
-    # Setup logging
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(log_dir, f"{agent_type}_eval_{timestamp}.csv")
-    
-    # Initialize metrics tracking
-    metrics = []
-    
-    # Run evaluation episodes
-    for episode in range(1, EVAL_EPISODES + 1):
-        # Run episode with evaluation_mode=True to force epsilon=0
-        result = run_episode(env, agents, evaluation_mode=True)
-        
-        metrics.append({
+        # Log every episode
+        training_log.append({
             'episode': episode,
             'agent_type': agent_type,
-            'total_reward': result['total_reward'],
+            'seed': seed,
+            'reward': result['total_reward'],
             'steps': result['steps'],
-            'rescued': result['rescued'],
+            'victims': result['victims'],
+            'duplicates': result['duplicates'],
+            'bytes': result['bytes'],
             'coverage': result['coverage'],
-            'comm_count': result['comm_count'],
-            'bytes_sent': result['bytes_sent'],
-            'duplicate_visits': result['duplicate_visits'],
-            'success_rate': 1 if result['success'] else 0,
-            'epsilon': 0,  # Fixed at 0 for evaluation
+            'success': int(result['success'])
         })
         
-        if episode % 10 == 0:
-            print(f"Evaluation episode {episode}/{EVAL_EPISODES}")
-    
-    # Save metrics to CSV
-    metrics_df = pd.DataFrame(metrics)
-    metrics_df.to_csv(log_path, index=False)
-    print(f"Evaluation results saved to {log_path}")
-    
-    return metrics_df
-
-def plot_results(data, plots_dir, is_evaluation=False):
-    """Generate plots comparing the communication strategies"""
-    os.makedirs(plots_dir, exist_ok=True)
-    
-    title_prefix = "Evaluation " if is_evaluation else ""
-    
-    # Group data by agent type and episode, calculating means and standard deviations
-    grouped = data.groupby(['agent_type', 'episode']).agg({
-        'total_reward': ['mean', 'std'],
-        'steps': ['mean', 'std'],
-        'rescued': ['mean', 'std'],
-        'coverage': ['mean', 'std'],
-        'comm_count': ['mean', 'std'],
-        'bytes_sent': ['mean', 'std'],
-        'duplicate_visits': ['mean', 'std'],
-        'success_rate': ['mean', 'std']
-    }).reset_index()
-    
-    # Plot metrics over episodes
-    metrics = {
-        'total_reward': 'Total Reward',
-        'steps': 'Episode Length',
-        'rescued': 'Victims Rescued',
-        'coverage': 'Environment Coverage',
-        'comm_count': 'Communication Count',
-        'bytes_sent': 'Bytes Sent',
-        'duplicate_visits': 'Duplicate Visits',
-        'success_rate': 'Success Rate'
-    }
-    
-    for metric, title in metrics.items():
-        plt.figure(figsize=(10, 6))
-        
-        for agent_type in AGENT_TYPES:
-            # Get data for this agent type
-            agent_data = grouped[grouped['agent_type'] == agent_type]
+        # Run evaluation every EVAL_EVERY episodes
+        if episode % EVAL_EVERY == 0 or episode == TOTAL_EPISODES:
+            eval_result = run_evaluation(env, agents, EVAL_EPISODES)
             
-            # Skip if no data for this agent type
-            if len(agent_data) == 0:
-                continue
-                
-            # Plot mean with standard deviation
-            plt.errorbar(
-                agent_data['episode'], 
-                agent_data[(metric, 'mean')],
-                yerr=agent_data[(metric, 'std')],
-                marker='o',
-                label=agent_type
-            )
+            eval_log.append({
+                'episode': episode,
+                'agent_type': agent_type,
+                'seed': seed,
+                'eval_success_rate': eval_result['eval_success_rate'],
+                'eval_steps_mean': eval_result['eval_steps_mean']
+            })
         
-        plt.title(f'{title_prefix}{title} vs Episodes')
-        plt.xlabel('Episodes')
-        plt.ylabel(title)
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        file_prefix = "eval_" if is_evaluation else ""
-        plt.savefig(os.path.join(plots_dir, f'{file_prefix}{metric}_vs_episodes.png'))
-        plt.close()
+        # Print progress every 1000 episodes
+        if episode % 1000 == 0:
+            r_mean = np.mean(reward_window)
+            v_mean = np.mean(victims_window)
+            d_mean = np.mean(duplicates_window)
+            b_mean = np.mean(bytes_window)
+            
+            elapsed = time.time() - start_time
+            eta = (elapsed / episode) * (TOTAL_EPISODES - episode)
+            
+            print(f"[{agent_type} | seed {seed}] ep {episode}/{TOTAL_EPISODES}  "
+                  f"R mean={r_mean:.1f}  victims mean={v_mean:.1f}  dupes mean={d_mean:.1f}  "
+                  f"bytes mean={b_mean:.1f}  ETA {eta/60:.1f}m")
     
-    # Create bar plots for final performance
-    final_results = data.groupby('agent_type').mean().reset_index()
+    # Save training and evaluation logs
+    train_df = pd.DataFrame(training_log)
+    train_df.to_csv(f"{LOG_DIR}/{agent_type}_seed{seed}_training.csv", index=False)
     
-    for metric, title in metrics.items():
-        plt.figure(figsize=(10, 6))
+    eval_df = pd.DataFrame(eval_log)
+    eval_df.to_csv(f"{LOG_DIR}/{agent_type}_seed{seed}_eval.csv", index=False)
+    
+    print(f"[{agent_type} | seed {seed}] Training completed in {(time.time() - start_time)/60:.1f} minutes")
+    
+    # Store results in shared dictionary for analysis
+    shared_results[(agent_type, seed)] = {
+        'train_df': train_df,
+        'eval_df': eval_df
+    }
+
+
+def generate_learning_curves(results):
+    # Combine all training data
+    all_training = []
+    for (agent_type, seed), data in results.items():
+        df = data['train_df'].copy()
+        df['agent_seed'] = f"{agent_type}_{seed}"
+        all_training.append(df)
+    
+    combined_df = pd.concat(all_training)
+    
+    # Create smoothed curves using rolling mean
+    plt.figure(figsize=(15, 10))
+    
+    # First subplot for rewards
+    plt.subplot(2, 1, 1)
+    for agent_type in AGENT_TYPES:
+        agent_data = combined_df[combined_df['agent_type'] == agent_type]
         
-        plt.bar(final_results['agent_type'], final_results[metric])
-        plt.title(f'{title_prefix}Final {title} by Communication Strategy')
-        plt.xlabel('Communication Strategy')
-        plt.ylabel(title)
-        plt.grid(axis='y')
-        plt.tight_layout()
-        file_prefix = "eval_" if is_evaluation else ""
-        plt.savefig(os.path.join(plots_dir, f'{file_prefix}{metric}_final.png'))
-        plt.close()
+        # Group by episode and calculate mean and CI across seeds
+        episode_groups = agent_data.groupby('episode')
+        means = episode_groups['reward'].mean()
+        ci = 1.96 * episode_groups['reward'].std() / np.sqrt(len(SEEDS))
+        
+        # Apply rolling window for smoothing
+        window_size = 500
+        means_smooth = means.rolling(window=window_size, min_periods=1).mean()
+        ci_smooth = ci.rolling(window=window_size, min_periods=1).mean()
+        
+        # Plot mean and confidence interval
+        episodes = means_smooth.index
+        plt.plot(episodes, means_smooth, label=agent_type.capitalize())
+        plt.fill_between(episodes, 
+                         means_smooth - ci_smooth, 
+                         means_smooth + ci_smooth, 
+                         alpha=0.2)
     
-    # Create a combined metrics plot
-    plt.figure(figsize=(12, 8))
-    
-    # Set final_results index to agent_type for easier access
-    final_results.set_index('agent_type', inplace=True)
-    
-    # Plot relationship between communication amount and performance
-    plt.scatter(final_results['bytes_sent'], final_results['rescued'] / final_results['steps'], 
-                s=100, label='Rescue efficiency')
-    plt.scatter(final_results['bytes_sent'], final_results['coverage'], 
-                s=100, label='Coverage')
-    plt.scatter(final_results['bytes_sent'], final_results['duplicate_visits'] / final_results['steps'], 
-                s=100, label='Redundancy rate')
-    
-    # Add labels to points
-    for idx in final_results.index:
-        row = final_results.loc[idx]
-        plt.annotate(idx, (row['bytes_sent'], row['rescued'] / row['steps']), 
-                    xytext=(5, 5), textcoords='offset points')
-    
-    plt.title(f'{title_prefix}Communication Amount vs Performance Metrics')
-    plt.xlabel('Bytes Sent')
-    plt.ylabel('Performance Metrics')
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.title('Learning Curves: Reward')
     plt.legend()
-    plt.grid(True)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # Second subplot for victims rescued
+    plt.subplot(2, 1, 2)
+    for agent_type in AGENT_TYPES:
+        agent_data = combined_df[combined_df['agent_type'] == agent_type]
+        
+        # Group by episode and calculate mean and CI across seeds
+        episode_groups = agent_data.groupby('episode')
+        means = episode_groups['victims'].mean()
+        ci = 1.96 * episode_groups['victims'].std() / np.sqrt(len(SEEDS))
+        
+        # Apply rolling window for smoothing
+        window_size = 500
+        means_smooth = means.rolling(window=window_size, min_periods=1).mean()
+        ci_smooth = ci.rolling(window=window_size, min_periods=1).mean()
+        
+        # Plot mean and confidence interval
+        episodes = means_smooth.index
+        plt.plot(episodes, means_smooth, label=agent_type.capitalize())
+        plt.fill_between(episodes, 
+                         means_smooth - ci_smooth, 
+                         means_smooth + ci_smooth, 
+                         alpha=0.2)
+    
+    plt.xlabel('Episode')
+    plt.ylabel('Victims Rescued')
+    plt.title('Learning Curves: Victims Rescued')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
     plt.tight_layout()
-    file_prefix = "eval_" if is_evaluation else ""
-    plt.savefig(os.path.join(plots_dir, f'{file_prefix}communication_vs_performance.png'))
+    plt.savefig(f"{LOG_DIR}/learn_curves.png", dpi=300)
+    plt.close()
+
+
+def generate_efficiency_bars(results):
+    # Extract final performance metrics from training data
+    summary_data = []
+    
+    for (agent_type, seed), data in results.items():
+        # Get last 5000 episodes for a stable estimate
+        df = data['train_df'].tail(5000)
+        
+        summary_data.append({
+            'agent_type': agent_type,
+            'seed': seed,
+            'steps_mean': df['steps'].mean(),
+            'duplicates_mean': df['duplicates'].mean(),
+            'bytes_mean': df['bytes'].mean(),
+        })
+    
+    summary_df = pd.DataFrame(summary_data)
+    
+    # Create bar plots
+    plt.figure(figsize=(15, 6))
+    
+    # Setup plot style
+    sns.set_style("whitegrid")
+    colors = sns.color_palette("muted", len(AGENT_TYPES))
+    
+    metrics = ['steps_mean', 'duplicates_mean', 'bytes_mean']
+    titles = ['Average Steps per Episode', 'Average Duplicate Visits', 'Average Bytes Sent']
+    
+    for i, (metric, title) in enumerate(zip(metrics, titles)):
+        plt.subplot(1, 3, i+1)
+        
+        # Calculate mean and confidence intervals per agent type
+        agent_stats = []
+        for j, agent_type in enumerate(AGENT_TYPES):
+            agent_data = summary_df[summary_df['agent_type'] == agent_type]
+            mean = agent_data[metric].mean()
+            ci = 1.96 * agent_data[metric].std() / np.sqrt(len(agent_data))
+            agent_stats.append((mean, ci))
+        
+        # Plot bars with error bars
+        x = np.arange(len(AGENT_TYPES))
+        means = [stat[0] for stat in agent_stats]
+        errors = [stat[1] for stat in agent_stats]
+        
+        plt.bar(x, means, yerr=errors, color=colors, alpha=0.7, capsize=10,
+                width=0.6, edgecolor='black', linewidth=1.5)
+        
+        plt.xticks(x, [a.capitalize() for a in AGENT_TYPES])
+        plt.title(title)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    plt.savefig(f"{LOG_DIR}/bars_efficiency.png", dpi=300)
+    plt.close()
+
+
+def generate_pareto_plot(results):
+    # Extract final performance metrics
+    pareto_data = []
+    
+    for (agent_type, seed), data in results.items():
+        # Get last 5000 episodes
+        df = data['train_df'].tail(5000)
+        
+        pareto_data.append({
+            'agent_type': agent_type,
+            'seed': seed,
+            'reward': df['reward'].mean(),
+            'bytes': df['bytes'].mean()
+        })
+    
+    pareto_df = pd.DataFrame(pareto_data)
+    
+    # Create Pareto plot
+    plt.figure(figsize=(10, 8))
+    
+    # Setup markers and colors
+    markers = {'independent': 'o', 'limited': 's', 'selective': '^', 'full': 'D'}
+    colors = {'independent': 'blue', 'limited': 'green', 'selective': 'orange', 'full': 'red'}
+    
+    # Plot each agent type
+    for agent_type in AGENT_TYPES:
+        agent_data = pareto_df[pareto_df['agent_type'] == agent_type]
+        plt.scatter(agent_data['bytes'], agent_data['reward'], 
+                   marker=markers[agent_type], color=colors[agent_type], s=100,
+                   label=agent_type.capitalize(), edgecolors='black', alpha=0.7)
+    
+    # Add labels and annotations for each point
+    for idx, row in pareto_df.iterrows():
+        plt.annotate(f"Seed {row['seed']}", 
+                    (row['bytes'], row['reward']),
+                    xytext=(7, 7), textcoords='offset points',
+                    fontsize=8)
+    
+    # Calculate average per strategy and add larger markers
+    for agent_type in AGENT_TYPES:
+        agent_data = pareto_df[pareto_df['agent_type'] == agent_type]
+        avg_bytes = agent_data['bytes'].mean()
+        avg_reward = agent_data['reward'].mean()
+        plt.scatter(avg_bytes, avg_reward, 
+                   marker=markers[agent_type], color=colors[agent_type], s=200,
+                   edgecolors='black', linewidth=2)
+        plt.annotate(f"{agent_type.capitalize()} Avg", 
+                    (avg_bytes, avg_reward),
+                    xytext=(10, 10), textcoords='offset points',
+                    fontsize=11, fontweight='bold')
+        
+    plt.xlabel('Average Bytes Sent per Episode')
+    plt.ylabel('Average Reward per Episode')
+    plt.title('Pareto Frontier: Reward vs. Communication Cost')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(f"{LOG_DIR}/pareto_reward_bytes.png", dpi=300)
     plt.close()
     
-    # Create performance summary
-    summary = final_results[['total_reward', 'steps', 'rescued', 'coverage', 
-                       'comm_count', 'bytes_sent', 'duplicate_visits', 'success_rate']]
-    summary['rescue_efficiency'] = summary['rescued'] / summary['steps']
-    
-    # Save summary to CSV
-    file_prefix = "eval_" if is_evaluation else ""
-    summary.to_csv(os.path.join(plots_dir, f'{file_prefix}performance_summary.csv'))
-    
-    print(f"{title_prefix}Plots and summary saved to {plots_dir}")
-    print(f"\n{title_prefix}Performance Summary:")
-    print(summary)
-    
-    return summary
 
-def analyze_evaluation_results(eval_dir):
-    """Analyze the evaluation results and generate a report"""
-    # Get all evaluation CSV files
-    all_files = [f for f in os.listdir(eval_dir) if f.endswith('.csv') and 'eval' in f]
+def calculate_statistics(results):
+    # Extract final performance metrics
+    final_metrics = []
     
-    if not all_files:
-        print("No evaluation results found to analyze")
-        return
-    
-    # Load and combine data
-    data_frames = []
-    for file in all_files:
-        data = pd.read_csv(os.path.join(eval_dir, file))
-        data_frames.append(data)
-    
-    combined_data = pd.concat(data_frames, ignore_index=True)
-    
-    # Generate plots
-    plots_dir = os.path.join(eval_dir, 'eval_plots')
-    summary = plot_results(combined_data, plots_dir, is_evaluation=True)
-    
-    # Create a text report based on evaluation results
-    report_path = os.path.join(eval_dir, 'evaluation_report.txt')
-    
-    with open(report_path, 'w') as f:
-        f.write("MULTI-AGENT COMMUNICATION STRATEGIES EVALUATION ANALYSIS\n")
-        f.write("===================================================\n\n")
+    for (agent_type, seed), data in results.items():
+        # Get last 5000 episodes
+        df = data['train_df'].tail(5000)
         
-        f.write("PERFORMANCE SUMMARY (EPSILON=0)\n")
-        f.write("----------------------------\n")
-        f.write(summary.to_string())
-        f.write("\n\n")
+        final_metrics.append({
+            'agent_type': agent_type,
+            'seed': seed,
+            'reward': df['reward'].mean(),
+            'steps': df['steps'].mean(),
+            'victims': df['victims'].mean(),
+            'duplicates': df['duplicates'].mean(),
+            'bytes': df['bytes'].mean(),
+            'coverage': df['coverage'].mean(),
+            'success_rate': df['success'].mean()
+        })
+    
+    metrics_df = pd.DataFrame(final_metrics)
+    
+    # Create summary table with one row per strategy×seed
+    summary_df = metrics_df.copy()
+    summary_df.to_csv(f"{LOG_DIR}/summary_table.csv", index=False)
+    
+    # Open a text file for statistics
+    with open(f"{LOG_DIR}/stats.txt", "w") as f:
+        f.write("STATISTICAL ANALYSIS\n")
+        f.write("===================\n\n")
         
-        # Add insights about each strategy
-        f.write("COMMUNICATION STRATEGY INSIGHTS\n")
-        f.write("-----------------------------\n")
+        # Compare each pair of agent types
+        metrics_to_compare = ['reward', 'steps', 'duplicates', 'bytes', 'coverage', 'success_rate']
         
-        # Independent
-        f.write("Independent Strategy (No Communication):\n")
-        if 'independent' in summary.index:
-            ind = summary.loc['independent']
-            f.write(f"- Rescued {ind['rescued']:.2f} victims in {ind['steps']:.2f} steps\n")
-            f.write(f"- Coverage: {ind['coverage']*100:.2f}%\n")
-            f.write(f"- Duplicate visits: {ind['duplicate_visits']:.2f}\n")
-            f.write(f"- No communication overhead ({ind['bytes_sent']:.2f} bytes)\n\n")
-        
-        # Limited
-        f.write("Limited Strategy (Time-Based Communication):\n")
-        if 'limited' in summary.index:
-            lim = summary.loc['limited']
-            ind = summary.loc['independent'] if 'independent' in summary.index else None
-            f.write(f"- Rescued {lim['rescued']:.2f} victims in {lim['steps']:.2f} steps\n")
-            f.write(f"- Coverage: {lim['coverage']*100:.2f}%\n")
-            f.write(f"- Duplicate visits: {lim['duplicate_visits']:.2f}\n")
-            f.write(f"- Communication overhead: {lim['bytes_sent']:.2f} bytes\n")
-            if ind is not None:
-                f.write(f"- Improvement over Independent: {(lim['rescue_efficiency']/ind['rescue_efficiency']-1)*100:.2f}% rescue efficiency\n\n")
-            else:
+        for i, agent1 in enumerate(AGENT_TYPES):
+            for j, agent2 in enumerate(AGENT_TYPES[i+1:], i+1):
+                f.write(f"Comparison: {agent1.capitalize()} vs {agent2.capitalize()}\n")
+                f.write("-" * 50 + "\n")
+                
+                for metric in metrics_to_compare:
+                    # Get data for both agent types
+                    data1 = metrics_df[metrics_df['agent_type'] == agent1][metric].values
+                    data2 = metrics_df[metrics_df['agent_type'] == agent2][metric].values
+                    
+                    # Perform paired t-test
+                    t_stat, p_value = stats.ttest_ind(data1, data2)
+                    
+                    # Calculate Cohen's d effect size
+                    mean1, mean2 = np.mean(data1), np.mean(data2)
+                    pooled_std = np.sqrt((np.std(data1, ddof=1)**2 + np.std(data2, ddof=1)**2) / 2)
+                    cohen_d = (mean2 - mean1) / pooled_std if pooled_std != 0 else 0
+                    
+                    # Interpret effect size
+                    if abs(cohen_d) < 0.2:
+                        effect = "negligible"
+                    elif abs(cohen_d) < 0.5:
+                        effect = "small"
+                    elif abs(cohen_d) < 0.8:
+                        effect = "medium"
+                    else:
+                        effect = "large"
+                    
+                    # Determine which is better (depends on the metric)
+                    if metric in ['reward', 'victims', 'coverage', 'success_rate']:
+                        better = agent1 if mean1 > mean2 else agent2
+                    else:  # For 'steps', 'duplicates', 'bytes', lower is better
+                        better = agent1 if mean1 < mean2 else agent2
+                    
+                    # Write results
+                    f.write(f"Metric: {metric}\n")
+                    f.write(f"  {agent1}: {mean1:.2f}, {agent2}: {mean2:.2f}\n")
+                    f.write(f"  t-statistic: {t_stat:.4f}, p-value: {p_value:.4f}\n")
+                    f.write(f"  Cohen's d: {cohen_d:.4f} ({effect} effect)\n")
+                    f.write(f"  Better strategy: {better}\n\n")
+                
                 f.write("\n")
         
-        # Selective
-        f.write("Selective Strategy (Need-Based Communication):\n")
-        if 'selective' in summary.index:
-            sel = summary.loc['selective']
-            ind = summary.loc['independent'] if 'independent' in summary.index else None
-            f.write(f"- Rescued {sel['rescued']:.2f} victims in {sel['steps']:.2f} steps\n")
-            f.write(f"- Coverage: {sel['coverage']*100:.2f}%\n")
-            f.write(f"- Duplicate visits: {sel['duplicate_visits']:.2f}\n")
-            f.write(f"- Communication overhead: {sel['bytes_sent']:.2f} bytes\n")
-            if ind is not None:
-                f.write(f"- Improvement over Independent: {(sel['rescue_efficiency']/ind['rescue_efficiency']-1)*100:.2f}% rescue efficiency\n\n")
-            else:
-                f.write("\n")
-        
-        # Full
-        f.write("Full Strategy (Continuous Communication):\n")
-        if 'full' in summary.index:
-            ful = summary.loc['full']
-            ind = summary.loc['independent'] if 'independent' in summary.index else None
-            f.write(f"- Rescued {ful['rescued']:.2f} victims in {ful['steps']:.2f} steps\n")
-            f.write(f"- Coverage: {ful['coverage']*100:.2f}%\n")
-            f.write(f"- Duplicate visits: {ful['duplicate_visits']:.2f}\n")
-            f.write(f"- Communication overhead: {ful['bytes_sent']:.2f} bytes\n")
-            if ind is not None:
-                f.write(f"- Improvement over Independent: {(ful['rescue_efficiency']/ind['rescue_efficiency']-1)*100:.2f}% rescue efficiency\n\n")
-            else:
-                f.write("\n")
-        
-        # Determine best strategy for different metrics
-        f.write("OPTIMAL COMMUNICATION STRATEGY (BASED ON EVALUATION)\n")
-        f.write("---------------------------------------------\n")
-        
-        best_reward = summary['total_reward'].idxmax()
-        best_efficiency = summary['rescue_efficiency'].idxmax()
-        best_coverage = summary['coverage'].idxmax()
-        least_redundancy = summary['duplicate_visits'].idxmin()
-        best_bytes_efficiency = (summary['total_reward'] / summary['bytes_sent'].replace(0, 1)).idxmax()
-        
-        f.write(f"Best for overall reward: {best_reward}\n")
-        f.write(f"Best for rescue efficiency: {best_efficiency}\n")
-        f.write(f"Best for environment coverage: {best_coverage}\n")
-        f.write(f"Best for minimizing redundancy: {least_redundancy}\n")
-        f.write(f"Best reward-to-communication ratio: {best_bytes_efficiency}\n\n")
-        
-        f.write("CONCLUSION (BASED ON EVALUATION WITH EPSILON=0)\n")
-        f.write("-------------------------------------------\n")
-        f.write("The optimal balance of communication depends on specific priorities:\n")
-        f.write("- If minimizing communication overhead is critical: Independent strategy\n")
-        f.write("- If maximizing rescue speed is the priority: Full strategy\n")
-        f.write("- If balancing efficiency and communication cost is desired: Selective or Limited strategy\n")
-        f.write("\nFor real-world applications, these insights can guide the development of adaptive communication\n")
-        f.write("strategies that adjust based on environment complexity and mission requirements.\n")
-    
-    print(f"Evaluation report generated at {report_path}")
+    return summary_df
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Multi-Agent Search and Rescue Experiment Runner")
-    global EVAL_EPISODES
+    global LOG_DIR, TOTAL_EPISODES
     
-    parser.add_argument('--episodes', type=int, default=TOTAL_EPISODES, help='Number of episodes to run')
-    parser.add_argument('--seeds', type=int, nargs='+', default=SEEDS, help='Seeds to use for experiments')
-    parser.add_argument('--types', type=str, nargs='+', default=AGENT_TYPES, help='Agent types to evaluate')
-    parser.add_argument('--analyze_only', action='store_true', help='Only analyze existing results')
-    parser.add_argument('--eval_only', action='store_true', help='Only run evaluation on trained agents')
-    parser.add_argument('--eval_episodes', type=int, default=EVAL_EPISODES, help='Number of evaluation episodes')
-    parser.add_argument('--log_dir', type=str, default=LOG_DIR, help='Directory for results')
+    parser = argparse.ArgumentParser(description='Search and Rescue Multi-Agent Training')
+    parser.add_argument('--agents', nargs='+', choices=AGENT_TYPES + ['all'], default=['all'],
+                        help='Agent types to train')
+    parser.add_argument('--seeds', nargs='+', type=int, default=SEEDS,
+                        help='Random seeds to use')
+    parser.add_argument('--episodes', type=int, default=TOTAL_EPISODES,
+                        help='Number of training episodes')
+    parser.add_argument('--logdir', type=str, default=LOG_DIR,
+                        help='Directory to save logs and plots')
+    
     args = parser.parse_args()
     
-    # Update global variables based on arguments
-    EVAL_EPISODES = args.eval_episodes
+    # Set global variables
+    LOG_DIR = args.logdir
+    TOTAL_EPISODES = args.episodes
     
-    # Create results directory
-    os.makedirs(args.log_dir, exist_ok=True)
+    # Determine which agents to train
+    agent_types = AGENT_TYPES if 'all' in args.agents else args.agents
+    seeds = args.seeds
     
-    if not args.analyze_only and not args.eval_only:
-        start_time = time.time()
-        
-        # Dictionary to store trained agents for each agent type
-        all_trained_agents = {}
-        
-        # Run training experiments for each agent type and seed
-        for agent_type in args.types:
-            # Use first seed for the agent that will be used in evaluation
-            trained_agents = run_experiment(agent_type, args.seeds[0], args.log_dir, args.episodes)
-            all_trained_agents[agent_type] = trained_agents
-            
-            # Run the remaining seeds for better training statistics
-            for seed in args.seeds[1:]:
-                run_experiment(agent_type, seed, args.log_dir, args.episodes)
-        
-        total_time = time.time() - start_time
-        print(f"All training experiments completed in {total_time/60:.2f} minutes")
-        
-        # Run evaluation phase for each agent type
-        for agent_type, trained_agents in all_trained_agents.items():
-            run_evaluation(agent_type, trained_agents, args.log_dir)
-        
-        # Analyze evaluation results
-        analyze_evaluation_results(args.log_dir)
+    print(f"Starting SAR experiment with agent types: {agent_types}")
+    print(f"Seeds: {seeds}")
+    print(f"Episodes: {TOTAL_EPISODES}")
+    print(f"Log directory: {LOG_DIR}")
     
-    elif args.eval_only:
-        # This section would need access to already trained agents
-        # In a real implementation, you would need to load them from files
-        print("Evaluation-only mode requires trained agents. Please run training first.")
+    # Create log directory
+    os.makedirs(LOG_DIR, exist_ok=True)
     
-    else:
-        # Analyze existing evaluation results
-        analyze_evaluation_results(args.log_dir)
+    # Use multiprocessing to run experiments in parallel
+    manager = Manager()
+    shared_results = manager.dict()
+    processes = []
+    
+    # Create a process for each agent_type × seed combination
+    for agent_type in agent_types:
+        for seed in seeds:
+            p = Process(target=train_and_evaluate, args=(agent_type, seed, shared_results))
+            processes.append(p)
+            p.start()
+    
+    # Wait for all processes to complete
+    for p in processes:
+        p.join()
+    
+    print("All training processes completed. Generating analysis...")
+    
+    # Generate analysis plots and statistics
+    generate_learning_curves(shared_results)
+    generate_efficiency_bars(shared_results)
+    generate_pareto_plot(shared_results)
+    summary_df = calculate_statistics(shared_results)
+    
+    print(f"Analysis complete. Results saved to {LOG_DIR}/")
+
 
 if __name__ == "__main__":
     main()
