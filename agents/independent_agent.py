@@ -3,7 +3,7 @@ from collections import defaultdict
 
 
 class IndependentAgent:
-    def __init__(self, idx, action_space=4, alpha=0.73, alpha_min=0.05, gamma=0.93, epsilon=0.97, eps_min=0.05, total_episodes = 357951):
+    def __init__(self, idx, action_space=4, alpha=0.73, alpha_min=0.05, gamma=0.95, epsilon=0.97, eps_min=0.05, total_episodes = 357951):
         self.id = idx
         self.action_space = action_space
         self.alpha = alpha

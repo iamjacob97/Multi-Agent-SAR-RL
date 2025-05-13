@@ -1,6 +1,5 @@
 import numpy as np
-from collections import defaultdict
-from .independent_agent import IndependentAgent
+from agents import IndependentAgent
 
 class FullAgent(IndependentAgent):
     def send(self, t):

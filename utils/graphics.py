@@ -25,19 +25,15 @@ class SARVisualizer:
         self.font = pygame.font.Font(None, 24)
         
         # Communication tracking
-        self.communicating_agents = set()  # Set of agent IDs that are currently communicating
-        self.comm_duration = 10  # How long agents stay yellow when communicating
+        self.communicating_agents = set()  
+        self.comm_duration = 10  
         
     def draw_grid(self):
         for i in range(self.grid_size + 1):
             # Vertical lines
-            pygame.draw.line(self.screen, self.GRAY,
-                           (i * self.cell_size, 0),
-                           (i * self.cell_size, self.window_size))
+            pygame.draw.line(self.screen, self.GRAY, (i * self.cell_size, 0), (i * self.cell_size, self.window_size))
             # Horizontal lines
-            pygame.draw.line(self.screen, self.GRAY,
-                           (0, i * self.cell_size),
-                           (self.window_size, i * self.cell_size))
+            pygame.draw.line(self.screen, self.GRAY, (0, i * self.cell_size), (self.window_size, i * self.cell_size))
     
     def draw_agent(self, pos, agent_id):
         x, y = pos
@@ -46,8 +42,7 @@ class SARVisualizer:
         
         # Draw agent circle - yellow if communicating, blue otherwise
         color = self.YELLOW if agent_id in self.communicating_agents else self.BLUE
-        pygame.draw.circle(self.screen, color,
-                         (center_x, center_y), self.cell_size // 3)
+        pygame.draw.circle(self.screen, color, (center_x, center_y), self.cell_size // 3)
         
         # Draw agent ID
         text = self.font.render(str(agent_id), True, self.WHITE)
@@ -62,21 +57,12 @@ class SARVisualizer:
         # Draw victim as a cross
         color = self.GREEN if rescued else self.RED
         size = self.cell_size // 4
-        pygame.draw.line(self.screen, color,
-                        (center_x - size, center_y),
-                        (center_x + size, center_y), 3)
-        pygame.draw.line(self.screen, color,
-                        (center_x, center_y - size),
-                        (center_x, center_y + size), 3)
+        pygame.draw.line(self.screen, color, (center_x - size, center_y), (center_x + size, center_y), 3)
+        pygame.draw.line(self.screen, color, (center_x, center_y - size), (center_x, center_y + size), 3)
     
     def draw_obstacle(self, pos):
         x, y = pos
-        rect = pygame.Rect(
-            x * self.cell_size + 2,
-            y * self.cell_size + 2,
-            self.cell_size - 4,
-            self.cell_size - 4
-        )
+        rect = pygame.Rect(x * self.cell_size + 2, y * self.cell_size + 2, self.cell_size - 4, self.cell_size - 4)
         pygame.draw.rect(self.screen, self.DARK_GRAY, rect)
     
     def update(self, agents, victims, obstacles, communications=None):
@@ -120,31 +106,26 @@ class SARVisualizer:
 
 # Example usage:
 if __name__ == "__main__":
-    # Create a 5x5 grid visualization
-    visualizer = SARVisualizer(grid_size=5)
+    # Create a 10x10 grid visualization (default settings)
+    visualizer = SARVisualizer(grid_size=10)
     
-    # Example agents
-    agents = [
-        {'position': (1, 1), 'id': 1},
-        {'position': (3, 3), 'id': 2},
-        {'position': (2, 2), 'id': 3}
-    ]
+    # Example agents (3 agents)
+    agents = [{'position': (2, 4), 'id': 0}, {'position': (5, 5), 'id': 1}, {'position': (8, 3), 'id': 2}]
     
-    # Example victims
-    victims = [
-        {'position': (0, 0), 'rescued': False},
-        {'position': (4, 4), 'rescued': True}
-    ]
+    # Example victims (7 victims)
+    victims = [{'position': (1, 1), 'rescued': False}, {'position': (1, 8), 'rescued': False},
+                {'position': (3, 4), 'rescued': False}, {'position': (4, 8), 'rescued': False},
+                {'position': (6, 2), 'rescued': False}, {'position': (7, 5), 'rescued': False},
+                {'position': (9, 9), 'rescued': False}]
     
-    # Example obstacles
-    obstacles = [
-        {'position': (1, 3)},
-        {'position': (3, 1)},
-        {'position': (2, 2)}
-    ]
+    # Example obstacles (11 obstacles)
+    obstacles = [{'position': (0, 3)}, {'position': (1, 6)}, {'position': (1, 9)},
+                {'position': (2, 9)}, {'position': (3, 2)}, {'position': (4, 6)},
+                {'position': (5, 8)}, {'position': (6, 3)}, {'position': (7, 4)},
+                {'position': (8, 7)}, {'position': (9, 0)}]
     
-    # Example communications
-    communications = [(1, 3), (2, 3)]
+    # Example communications (showing communication between agents)
+    communications = []
     
     # Main loop
     running = True

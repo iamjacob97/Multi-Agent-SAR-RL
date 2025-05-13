@@ -4,6 +4,7 @@ from env import RescueEnv
 from agents import IndependentAgent, LimitedAgent, FullAgent, SelectiveAgent
 import argparse
 import time
+from collections import deque
 
 # Configuration
 GRID_SIZE = (5, 5)
@@ -18,14 +19,8 @@ def check_environment():
     print("\nCHECKING ENVIRONMENT...")
     
     # Create environment
-    env = RescueEnv(
-        grid_size=GRID_SIZE, 
-        num_agents=NUM_AGENTS, 
-        num_victims=NUM_VICTIMS, 
-        num_obstacles=NUM_OBSTACLES, 
-        max_steps=MAX_STEPS, 
-        seed=SEED
-    )
+    env = RescueEnv(grid_size=GRID_SIZE, num_agents=NUM_AGENTS, num_victims=NUM_VICTIMS, 
+                    num_obstacles=NUM_OBSTACLES, max_steps=MAX_STEPS, seed=SEED)
     
     # Check initialization
     obs = env.reset()
@@ -40,7 +35,7 @@ def check_environment():
     
     # Check step function
     agents = [IndependentAgent(id) for id in range(NUM_AGENTS)]
-    actions = [0] * NUM_AGENTS  # Just move all agents up
+    actions = [0] * NUM_AGENTS  
     next_obs, rewards, done, info = env.step(actions, agents)
     
     assert len(next_obs) == NUM_AGENTS, "Step returned wrong number of observations"
@@ -60,14 +55,9 @@ def check_environment():
 def check_agent_behavior(agent_type):
     print(f"\nCHECKING {agent_type.upper()} AGENT BEHAVIOR...")
     
-    env = RescueEnv(
-        grid_size=GRID_SIZE, 
-        num_agents=NUM_AGENTS, 
-        num_victims=NUM_VICTIMS, 
-        num_obstacles=NUM_OBSTACLES, 
-        max_steps=MAX_STEPS, 
-        seed=SEED
-    )
+    env = RescueEnv(grid_size=GRID_SIZE, num_agents=NUM_AGENTS, 
+                    num_victims=NUM_VICTIMS, num_obstacles=NUM_OBSTACLES, 
+                    max_steps=MAX_STEPS, seed=SEED)
     
     # Create agents
     if agent_type == "independent":
@@ -90,7 +80,7 @@ def check_agent_behavior(agent_type):
         assert 0 <= action < 4, f"Agent {i} returned invalid action: {action}"
     
     # Check communication behavior
-    for t in range(5):  # Run for a few steps
+    for t in range(15):  
         # Get actions
         actions = [agent.act(o) for agent, o in zip(agents, obs)]
         
@@ -117,14 +107,8 @@ def run_test(agent_type):
     start_time = time.time()
     
     # Create environment
-    env = RescueEnv(
-        grid_size=GRID_SIZE, 
-        num_agents=NUM_AGENTS, 
-        num_victims=NUM_VICTIMS, 
-        num_obstacles=NUM_OBSTACLES, 
-        max_steps=MAX_STEPS, 
-        seed=SEED
-    )
+    env = RescueEnv(grid_size=GRID_SIZE, num_agents=NUM_AGENTS, num_victims=NUM_VICTIMS, 
+                    num_obstacles=NUM_OBSTACLES, max_steps=MAX_STEPS, seed=SEED)
     
     # Create agents
     if agent_type == "independent":
@@ -140,17 +124,10 @@ def run_test(agent_type):
     
     # Track metrics
     success_count = 0
-    recent_td_errors = []
     episode_rewards = []
     episode_coverages = []
     episode_rescues = []
     communication_counts = []
-    
-    # For convergence detection
-    convergence_window = 100
-    convergence_threshold = 0.01
-    converged = False
-    convergence_episode = -1
     
     for episode in range(NUM_EPISODES):
         # Reset environment and agents
@@ -160,7 +137,6 @@ def run_test(agent_type):
         
         # Run episode
         done = False
-        episode_td_errors = []
         episode_reward = 0
         
         while not done:
@@ -172,9 +148,7 @@ def run_test(agent_type):
             
             # Update agents
             for agent, o, r in zip(agents, next_obs, rewards):
-                td_error = agent.update(o, r, done, info)
-                if td_error is not None:
-                    episode_td_errors.append(abs(td_error))
+                agent.update(o, r, done, info)
             
             episode_reward += sum(rewards)
             obs = next_obs
@@ -183,32 +157,16 @@ def run_test(agent_type):
         if info['rescued'] == NUM_VICTIMS:
             success_count += 1
         
-        # Track TD errors for convergence detection
-        avg_td_error = np.mean(episode_td_errors) if episode_td_errors else 0
-        recent_td_errors.append(avg_td_error)
-        if len(recent_td_errors) > convergence_window:
-            recent_td_errors.pop(0)
-        
-        # Track additional metrics
         episode_rewards.append(episode_reward)
         episode_coverages.append(info['coverage'])
         episode_rescues.append(info['rescued'])
         communication_counts.append(len(info['comms']))
         
-        # Check for convergence
-        if len(recent_td_errors) == convergence_window:
-            avg_error = np.mean(recent_td_errors[-20:])  # Last 20 episodes
-            if avg_error < convergence_threshold and not converged:
-                converged = True
-                convergence_episode = episode
-                print(f"Q-learning appears to have converged at episode {episode+1}")
-        
         # Display progress
         if (episode + 1) % 100 == 0 or episode == 0 or episode == NUM_EPISODES-1:
             success_rate = success_count / (episode + 1) * 100
-            recent_td = np.mean(recent_td_errors[-min(100, len(recent_td_errors)):])
             recent_reward = np.mean(episode_rewards[-min(100, len(episode_rewards)):])
-            print(f"Episode {episode+1}/{NUM_EPISODES}, TD Error: {recent_td:.5f}, "
+            print(f"Episode {episode+1}/{NUM_EPISODES}, "
                   f"Reward: {recent_reward:.2f}, Success Rate: {success_rate:.1f}%")
     
     elapsed_time = time.time() - start_time
@@ -216,7 +174,6 @@ def run_test(agent_type):
     # Print final results
     print(f"\nRESULTS for {agent_type.upper()} agents after {elapsed_time:.1f} seconds:")
     print(f"Success Rate: {success_count/NUM_EPISODES*100:.1f}%")
-    print(f"Final TD Error: {np.mean(recent_td_errors[-100:]):.5f}")
     print(f"Average Reward: {np.mean(episode_rewards[-100:]):.2f}")
     print(f"Average Coverage: {np.mean(episode_coverages[-100:]):.2f}")
     print(f"Average Rescues: {np.mean(episode_rescues[-100:]):.2f}")
@@ -225,20 +182,30 @@ def run_test(agent_type):
     for i, agent in enumerate(agents):
         print(f"Agent {i} Q-table size: {len(agent.q_table)} states, Bytes sent: {agent.bytes_sent}")
     
-    if converged:
-        print(f"Q-learning converged at episode {convergence_episode+1}")
-    else:
-        print("Q-learning did not converge within the episode limit")
-    
     # Create visualization
     fig, axs = plt.subplots(2, 2, figsize=(12, 10))
     
-    # Moving averages
     window = 50
-    rewards_ma = np.convolve(episode_rewards, np.ones(window)/window, mode='valid')
-    coverage_ma = np.convolve(episode_coverages, np.ones(window)/window, mode='valid')
-    rescues_ma = np.convolve(episode_rescues, np.ones(window)/window, mode='valid')
-    td_errors_ma = np.convolve(recent_td_errors, np.ones(window)/window, mode='valid')
+    rewards_ma = []
+    coverage_ma = []
+    rescues_ma = []
+    bytes_ma = []
+    
+    rewards_window = deque(maxlen=window)
+    coverage_window = deque(maxlen=window)
+    rescues_window = deque(maxlen=window)
+    bytes_window = deque(maxlen=window)
+    
+    for i in range(len(episode_rewards)):
+        rewards_window.append(episode_rewards[i])
+        coverage_window.append(episode_coverages[i])
+        rescues_window.append(episode_rescues[i])
+        bytes_window.append(communication_counts[i])
+        
+        rewards_ma.append(np.mean(rewards_window))
+        coverage_ma.append(np.mean(coverage_window))
+        rescues_ma.append(np.mean(rescues_window))
+        bytes_ma.append(np.mean(bytes_window))
     
     # Plot metrics
     axs[0, 0].plot(rewards_ma)
@@ -257,10 +224,10 @@ def run_test(agent_type):
     axs[1, 0].set_ylabel('Count')
     axs[1, 0].set_ylim(0, NUM_VICTIMS)
     
-    axs[1, 1].plot(td_errors_ma)
-    axs[1, 1].set_title('TD Error')
+    axs[1, 1].plot(bytes_ma)
+    axs[1, 1].set_title('Average Bytes Sent')
     axs[1, 1].set_xlabel('Episode')
-    axs[1, 1].set_ylabel('Error')
+    axs[1, 1].set_ylabel('Bytes')
     
     plt.tight_layout()
     plt.savefig(f"{agent_type}_performance.png")

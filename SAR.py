@@ -6,11 +6,9 @@ import pandas as pd
 import os
 import time
 import argparse
-from datetime import datetime
 import seaborn as sns
 from multiprocessing import Process, Manager
 from scipy import stats
-import math
 from collections import deque
 
 # Configuration
@@ -20,10 +18,10 @@ NUM_OBSTACLES = 11
 GRID_SIZE = (10, 10)
 TOTAL_EPISODES = 357951
 MAX_STEPS = 33 
-SEEDS = [1, 3, 5, 7, 9, 11, 13, 15, 17]  # Seeds for reproducibility
+SEEDS = [1, 3, 5, 7, 9, 11, 13, 15, 17]  
 AGENT_TYPES = ['independent', 'limited', 'selective', 'full']
-EVAL_EPISODES = 100  # Number of evaluation episodes
-EVAL_EVERY = 1000  # Evaluate every X episodes
+EVAL_EPISODES = 100  
+EVAL_EVERY = 1000  
 LOG_DIR = "results"
 
 
@@ -85,16 +83,9 @@ def run_episode(env, agents, evaluation_mode=False):
     current_bytes = sum(agent.bytes_sent for agent in agents)
     bytes_sent = current_bytes - initial_bytes
     
-    return {
-        'total_reward': total_reward,
-        'steps': info['steps'],
-        'victims': info['rescued'], 
-        'duplicates': duplicates,
-        'bytes': bytes_sent,
-        'coverage': info['coverage'],
-        'success': info['rescued'] == env.num_victims
-    }
-
+    return {'total_reward': total_reward, 'steps': info['steps'], 'victims': info['rescued'], 
+            'duplicates': duplicates, 'bytes': bytes_sent, 'coverage': info['coverage'],
+            'success': info['rescued'] == env.num_victims}
 
 def run_evaluation(env, agents, num_episodes):
     success_count = 0
@@ -109,24 +100,14 @@ def run_evaluation(env, agents, num_episodes):
     success_rate = success_count / num_episodes
     steps_mean = np.mean(steps_list) if steps_list else 0
     
-    return {
-        'eval_success_rate': success_rate,
-        'eval_steps_mean': steps_mean
-    }
-
+    return {'eval_success_rate': success_rate,'eval_steps_mean': steps_mean}
 
 def train_and_evaluate(agent_type, seed, shared_results):
     print(f"[{agent_type} | seed {seed}] Starting training...")
     
     # Create environment and agents
-    env = RescueEnv(
-        grid_size=GRID_SIZE,
-        num_agents=NUM_AGENTS,
-        num_victims=NUM_VICTIMS,
-        num_obstacles=NUM_OBSTACLES,
-        max_steps=MAX_STEPS,
-        seed=seed
-    )
+    env = RescueEnv(grid_size=GRID_SIZE, num_agents=NUM_AGENTS, num_victims=NUM_VICTIMS,
+                    num_obstacles=NUM_OBSTACLES, max_steps=MAX_STEPS, seed=seed)
     
     agents = create_agents(agent_type, NUM_AGENTS)
     
@@ -156,30 +137,19 @@ def train_and_evaluate(agent_type, seed, shared_results):
         bytes_window.append(result['bytes'])
         
         # Log every episode
-        training_log.append({
-            'episode': episode,
-            'agent_type': agent_type,
-            'seed': seed,
-            'reward': result['total_reward'],
-            'steps': result['steps'],
-            'victims': result['victims'],
-            'duplicates': result['duplicates'],
-            'bytes': result['bytes'],
-            'coverage': result['coverage'],
-            'success': int(result['success'])
-        })
+        training_log.append({'episode': episode, 'agent_type': agent_type, 'seed': seed,
+                            'reward': result['total_reward'], 'steps': result['steps'],
+                            'victims': result['victims'], 'duplicates': result['duplicates'],
+                            'bytes': result['bytes'], 'coverage': result['coverage'],
+                            'success': int(result['success'])})
         
         # Run evaluation every EVAL_EVERY episodes
         if episode % EVAL_EVERY == 0 or episode == TOTAL_EPISODES:
             eval_result = run_evaluation(env, agents, EVAL_EPISODES)
             
-            eval_log.append({
-                'episode': episode,
-                'agent_type': agent_type,
-                'seed': seed,
-                'eval_success_rate': eval_result['eval_success_rate'],
-                'eval_steps_mean': eval_result['eval_steps_mean']
-            })
+            eval_log.append({'episode': episode, 'agent_type': agent_type, 'seed': seed,
+                            'eval_success_rate': eval_result['eval_success_rate'],
+                            'eval_steps_mean': eval_result['eval_steps_mean']})
         
         # Print progress every 1000 episodes
         if episode % 1000 == 0:
@@ -205,11 +175,7 @@ def train_and_evaluate(agent_type, seed, shared_results):
     print(f"[{agent_type} | seed {seed}] Training completed in {(time.time() - start_time)/60:.1f} minutes")
     
     # Store results in shared dictionary for analysis
-    shared_results[(agent_type, seed)] = {
-        'train_df': train_df,
-        'eval_df': eval_df
-    }
-
+    shared_results[(agent_type, seed)] = {'train_df': train_df, 'eval_df': eval_df}
 
 def generate_learning_curves(results):
     # Combine all training data
@@ -242,10 +208,7 @@ def generate_learning_curves(results):
         # Plot mean and confidence interval
         episodes = means_smooth.index
         plt.plot(episodes, means_smooth, label=agent_type.capitalize())
-        plt.fill_between(episodes, 
-                         means_smooth - ci_smooth, 
-                         means_smooth + ci_smooth, 
-                         alpha=0.2)
+        plt.fill_between(episodes, means_smooth - ci_smooth, means_smooth + ci_smooth, alpha=0.2)
     
     plt.xlabel('Episode')
     plt.ylabel('Reward')
@@ -271,10 +234,7 @@ def generate_learning_curves(results):
         # Plot mean and confidence interval
         episodes = means_smooth.index
         plt.plot(episodes, means_smooth, label=agent_type.capitalize())
-        plt.fill_between(episodes, 
-                         means_smooth - ci_smooth, 
-                         means_smooth + ci_smooth, 
-                         alpha=0.2)
+        plt.fill_between(episodes, means_smooth - ci_smooth, means_smooth + ci_smooth, alpha=0.2)
     
     plt.xlabel('Episode')
     plt.ylabel('Victims Rescued')
@@ -286,7 +246,6 @@ def generate_learning_curves(results):
     plt.savefig(f"{LOG_DIR}/learn_curves.png", dpi=300)
     plt.close()
 
-
 def generate_efficiency_bars(results):
     # Extract final performance metrics from training data
     summary_data = []
@@ -295,13 +254,8 @@ def generate_efficiency_bars(results):
         # Get last 5000 episodes for a stable estimate
         df = data['train_df'].tail(5000)
         
-        summary_data.append({
-            'agent_type': agent_type,
-            'seed': seed,
-            'steps_mean': df['steps'].mean(),
-            'duplicates_mean': df['duplicates'].mean(),
-            'bytes_mean': df['bytes'].mean(),
-        })
+        summary_data.append({'agent_type': agent_type, 'seed': seed, 'steps_mean': df['steps'].mean(),
+                            'duplicates_mean': df['duplicates'].mean(),'bytes_mean': df['bytes'].mean(),})
     
     summary_df = pd.DataFrame(summary_data)
     
@@ -338,10 +292,10 @@ def generate_efficiency_bars(results):
         plt.title(title)
         plt.grid(axis='y', linestyle='--', alpha=0.7)
     
-    plt.tight_layout()
+        plt.tight_layout()
     plt.savefig(f"{LOG_DIR}/bars_efficiency.png", dpi=300)
     plt.close()
-
+    
 
 def generate_pareto_plot(results):
     # Extract final performance metrics
@@ -351,12 +305,8 @@ def generate_pareto_plot(results):
         # Get last 5000 episodes
         df = data['train_df'].tail(5000)
         
-        pareto_data.append({
-            'agent_type': agent_type,
-            'seed': seed,
-            'reward': df['reward'].mean(),
-            'bytes': df['bytes'].mean()
-        })
+        pareto_data.append({'agent_type': agent_type, 'seed': seed, 'reward': df['reward'].mean(),
+                            'bytes': df['bytes'].mean()})
     
     pareto_df = pd.DataFrame(pareto_data)
     
@@ -413,17 +363,10 @@ def calculate_statistics(results):
         # Get last 5000 episodes
         df = data['train_df'].tail(5000)
         
-        final_metrics.append({
-            'agent_type': agent_type,
-            'seed': seed,
-            'reward': df['reward'].mean(),
-            'steps': df['steps'].mean(),
-            'victims': df['victims'].mean(),
-            'duplicates': df['duplicates'].mean(),
-            'bytes': df['bytes'].mean(),
-            'coverage': df['coverage'].mean(),
-            'success_rate': df['success'].mean()
-        })
+        final_metrics.append({'agent_type': agent_type, 'seed': seed, 'reward': df['reward'].mean(),
+                            'steps': df['steps'].mean(), 'victims': df['victims'].mean(),
+                            'duplicates': df['duplicates'].mean(), 'bytes': df['bytes'].mean(),
+                            'coverage': df['coverage'].mean(), 'success_rate': df['success'].mean()})
     
     metrics_df = pd.DataFrame(final_metrics)
     

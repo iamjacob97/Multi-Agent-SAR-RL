@@ -1,4 +1,7 @@
 # Core environment packages
-numpy>=1.21.0  # For grid operations and array handling
-pygame>=2.5.0  # For visualization and simulation
-matplotlib>=3.5.0  # For plotting results and metrics 
+numpy>=1.21.0  
+pandas>=2.0.0  
+matplotlib>=3.5.0  
+seaborn>=0.12.0  
+scipy>=1.10.0  
+pygame>=2.5.0  

@@ -20,6 +20,7 @@ def run_episode(env, agents, evaluation_mode=False):
     obs = env.reset()
     done = False
     total_reward = 0
+    episode_td_errors = []
     
     for agent in agents:
         agent.reset()
@@ -40,32 +41,25 @@ def run_episode(env, agents, evaluation_mode=False):
         
         for agent, o, r in zip(agents, next_obs, rewards):
             if not evaluation_mode:
-                agent.update(o, r, done, info)
+                td_error = agent.update(o, r, done, info)
+                if td_error is not None:
+                    episode_td_errors.append(abs(td_error))
             total_reward += r
 
         obs = next_obs
     
-    return {
-        'total_reward': total_reward,
-        'steps': info['steps'],
-        'victims': info['rescued'],
-        'coverage': info['coverage'],
-        'success': info['rescued'] == env.num_victims,
-        'q_table_size': agents[0].q_table_size  # Track Q-table size
-    }
+    mean_td_error = np.mean(episode_td_errors) if episode_td_errors else 0
+    return {'total_reward': total_reward, 'steps': info['steps'], 'victims': info['rescued'],
+            'coverage': info['coverage'], 'success': info['rescued'] == env.num_victims,
+            'q_table_size': agents[0].q_table_size, 'td_error': mean_td_error}
 
 def main():
     print("Starting convergence test...")
     
     # Create environment and agent
-    env = RescueEnv(
-        grid_size=GRID_SIZE,
-        num_agents=NUM_AGENTS,
-        num_victims=NUM_VICTIMS,
-        num_obstacles=NUM_OBSTACLES,
-        max_steps=MAX_STEPS,
-        seed=SEED
-    )
+    env = RescueEnv(grid_size=GRID_SIZE, num_agents=NUM_AGENTS,
+                    num_victims=NUM_VICTIMS, num_obstacles=NUM_OBSTACLES,
+                    max_steps=MAX_STEPS, seed=SEED)
     
     agents = [IndependentAgent(i) for i in range(NUM_AGENTS)]
     
@@ -77,6 +71,7 @@ def main():
     victims_window = deque(maxlen=WINDOW_SIZE)
     coverage_window = deque(maxlen=WINDOW_SIZE)
     q_table_window = deque(maxlen=WINDOW_SIZE)
+    td_error_window = deque(maxlen=WINDOW_SIZE)
     
     start_time = time.time()
     
@@ -90,17 +85,13 @@ def main():
         victims_window.append(result['victims'])
         coverage_window.append(result['coverage'])
         q_table_window.append(result['q_table_size'])
+        td_error_window.append(result['td_error'])
         
         # Log every episode
-        training_log.append({
-            'episode': episode,
-            'reward': result['total_reward'],
-            'steps': result['steps'],
-            'victims': result['victims'],
-            'coverage': result['coverage'],
-            'success': int(result['success']),
-            'q_table_size': result['q_table_size']
-        })
+        training_log.append({'episode': episode, 'reward': result['total_reward'],
+                            'steps': result['steps'], 'victims': result['victims'],
+                            'coverage': result['coverage'], 'success': int(result['success']),
+                            'q_table_size': result['q_table_size'], 'td_error': result['td_error']})
         
         # Print progress every 1000 episodes
         if episode % 1000 == 0:
@@ -108,6 +99,7 @@ def main():
             v_mean = np.mean(victims_window)
             c_mean = np.mean(coverage_window)
             q_mean = np.mean(q_table_window)
+            td_mean = np.mean(td_error_window)
             
             elapsed = time.time() - start_time
             eta = (elapsed / episode) * (TOTAL_EPISODES - episode)
@@ -115,7 +107,7 @@ def main():
             print(f"Episode {episode}/{TOTAL_EPISODES}  "
                   f"R mean={r_mean:.1f}  victims mean={v_mean:.1f}  "
                   f"coverage mean={c_mean:.2f}  Q-table mean={q_mean:.0f}  "
-                  f"ETA {eta/60:.1f}m")
+                  f"TD error mean={td_mean:.4f}  ETA {eta/60:.1f}m")
     
     # Save training log
     train_df = pd.DataFrame(training_log)
@@ -125,7 +117,7 @@ def main():
     plt.figure(figsize=(15, 10))
     
     # Plot rewards
-    plt.subplot(2, 2, 1)
+    plt.subplot(2, 3, 1)
     window_size = 1000
     rewards_smooth = train_df['reward'].rolling(window=window_size, min_periods=1).mean()
     plt.plot(train_df['episode'], rewards_smooth)
@@ -135,7 +127,7 @@ def main():
     plt.grid(True, linestyle='--', alpha=0.7)
     
     # Plot victims rescued
-    plt.subplot(2, 2, 2)
+    plt.subplot(2, 3, 2)
     victims_smooth = train_df['victims'].rolling(window=window_size, min_periods=1).mean()
     plt.plot(train_df['episode'], victims_smooth)
     plt.xlabel('Episode')
@@ -144,7 +136,7 @@ def main():
     plt.grid(True, linestyle='--', alpha=0.7)
     
     # Plot coverage
-    plt.subplot(2, 2, 3)
+    plt.subplot(2, 3, 3)
     coverage_smooth = train_df['coverage'].rolling(window=window_size, min_periods=1).mean()
     plt.plot(train_df['episode'], coverage_smooth)
     plt.xlabel('Episode')
@@ -153,12 +145,21 @@ def main():
     plt.grid(True, linestyle='--', alpha=0.7)
     
     # Plot Q-table size
-    plt.subplot(2, 2, 4)
+    plt.subplot(2, 3, 4)
     q_table_smooth = train_df['q_table_size'].rolling(window=window_size, min_periods=1).mean()
     plt.plot(train_df['episode'], q_table_smooth)
     plt.xlabel('Episode')
     plt.ylabel('Q-table Size')
     plt.title('Learning Curve: Q-table Size')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # Plot TD error
+    plt.subplot(2, 3, 5)
+    td_error_smooth = train_df['td_error'].rolling(window=window_size, min_periods=1).mean()
+    plt.plot(train_df['episode'], td_error_smooth)
+    plt.xlabel('Episode')
+    plt.ylabel('TD Error')
+    plt.title('Learning Curve: TD Error')
     plt.grid(True, linestyle='--', alpha=0.7)
     
     plt.tight_layout()
