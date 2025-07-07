@@ -47,6 +47,10 @@ pip install -r requirements.txt
 - `smoke_test.py` - Testing script
 - `convergence_test.py` - Convergence analysis script
 
+## Report
+
+See report *20700939_DIA report.pdf*
+
 ## Results
 
 Results are saved in the `results/` directory, including:
@@ -54,5 +58,3 @@ Results are saved in the `results/` directory, including:
 - Efficiency metrics
 - Statistical analysis
 - Visualization plots
-
-
